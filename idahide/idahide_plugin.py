@@ -14,6 +14,31 @@ def get_debugged_process_pid():
     event = ida_dbg.get_debug_event()
     return event.pid if event else -1
 
+def start_process_with_options():
+    """
+    Starts a new process for debugging using the settings from "Process options".
+    """
+    path, args, sdir, host, passwd, port = ida_dbg.get_process_options()
+
+    if not path:
+        ida_kernwin.warning("Process path is not configured in 'Debugger > Process options'.")
+        return False
+
+    ida_kernwin.msg(f"Starting process: {path}\n")
+    
+    # start_process with None arguments uses the settings from Process Options
+    result = ida_dbg.start_process(None, None, None)
+
+    if result == 1:
+        ida_kernwin.msg("Process started successfully. Waiting for IDA to suspend...\n")
+        return True
+    elif result == 0:
+        ida_kernwin.warning("Process start cancelled by user.\n")
+    else:
+        ida_kernwin.warning("Failed to start process. Check debugger settings and output log.\n")
+    return False
+
+
 # --- Konfiguracja ---
 INJECTOR_EXE_X86 = "InjectorCLIx86.exe"
 INJECTOR_EXE_X64 = "InjectorCLIx64.exe"
@@ -21,21 +46,74 @@ HOOK_DLL_X86 = "HookLibraryx86.dll"
 HOOK_DLL_X64 = "HookLibraryx64.dll"
 # --- Koniec Konfiguracji ---
 
+class InjectHandler(ida_kernwin.action_handler_t):
+    """Action handler for injecting into the current debugged process."""
+    def __init__(self, plugin_instance):
+        ida_kernwin.action_handler_t.__init__(self)
+        self.plugin = plugin_instance
+
+    def activate(self, ctx):
+        self.plugin.inject_scylla()
+        return 1
+
+    def update(self, ctx):
+        return ida_kernwin.AST_ENABLE_ALWAYS
+
+class StartAndInjectHandler(ida_kernwin.action_handler_t):
+    """Action handler for starting a new process and then injecting."""
+    def __init__(self, plugin_instance):
+        ida_kernwin.action_handler_t.__init__(self)
+        self.plugin = plugin_instance
+
+    def activate(self, ctx):
+        ida_kernwin.msg("--- ScyllaHide Auto-Starter & Injector ---\n")
+        # Logic to start and inject will be added here.
+        ida_kernwin.msg("Start and inject action triggered. Logic to be implemented.\n")
+        ida_kernwin.msg("-------------------------------------------\n")
+        return 1
+
+    def update(self, ctx):
+        return ida_kernwin.AST_ENABLE_ALWAYS
+
 class ScyllaInjectorPlugin(ida_idaapi.plugin_t):
     flags = ida_idaapi.PLUGIN_UNL
-    comment = "Injects ScyllaHide into the current debugged process"
-    help = "Run this plugin while a process is suspended in the IDA debugger to inject ScyllaHide."
-    wanted_name = "ScyllaHide: Inject into process"
-    wanted_hotkey = "Ctrl-Alt-S"
+    comment = "Injects ScyllaHide into processes"
+    help = "Use 'ScyllaHide: Inject into process' while a process is suspended in the IDA debugger to inject ScyllaHide."
+    wanted_name = "ScyllaHide Injector"
+    wanted_hotkey = ""
 
     def init(self):
         ida_kernwin.msg("ScyllaHide Injector plugin loaded.\n")
+
+        # Register the "Inject" action
+        inject_action_desc = ida_kernwin.action_desc_t(
+            'scylla:inject',
+            'ScyllaHide: Inject into process',
+            InjectHandler(self),
+            'Ctrl-Alt-S')
+        ida_kernwin.register_action(inject_action_desc)
+        ida_kernwin.attach_action_to_menu('Debugger/ScyllaHide/', 'scylla:inject', ida_kernwin.SETMENU_APP)
+
+        # Register the "Start and Inject" action
+        start_inject_action_desc = ida_kernwin.action_desc_t(
+            'scylla:start_and_inject',
+            'ScyllaHide: Start process and inject',
+            StartAndInjectHandler(self))
+        ida_kernwin.register_action(start_inject_action_desc)
+        ida_kernwin.attach_action_to_menu('Debugger/ScyllaHide/', 'scylla:start_and_inject', ida_kernwin.SETMENU_APP)
+
         return ida_idaapi.PLUGIN_OK
 
     def term(self):
-        pass
+        ida_kernwin.unregister_action('scylla:inject')
+        ida_kernwin.unregister_action('scylla:start_and_inject')
+        ida_kernwin.msg("ScyllaHide Injector plugin unloaded.\n")
 
     def run(self, arg):
+        # This is now just a placeholder, as actions are used.
+        ida_kernwin.msg("Please use the 'Debugger > ScyllaHide' menu.\n")
+
+    def inject_scylla(self):
         ida_kernwin.msg("--- ScyllaHide Auto-Injector ---\n")
 
         # 1. Get the Process ID (PID) of the currently debugged process
@@ -44,7 +122,7 @@ class ScyllaInjectorPlugin(ida_idaapi.plugin_t):
         if pid == -1:
             ida_kernwin.warning("Could not determine the PID of the debugged process. Is a process being debugged and suspended?")
             return
-
+        
         ida_kernwin.msg(f"Using PID: {pid}\n")
 
         # 2. Use the PID to perform injection
@@ -66,28 +144,22 @@ class ScyllaInjectorPlugin(ida_idaapi.plugin_t):
         ida_kernwin.msg(f"Using DLL: {os.path.basename(dll_path)}\n")
 
         command = [injector_path, f"pid:{pid}", dll_path]
-        ida_kernwin.msg(f"Executing command: {' '.join(command)}\n")
+        ida_kernwin.msg(f"Executing command: {' '.join(command)}\n")        
 
         try:
-            result = subprocess.run(
-                command, capture_output=True, text=True, check=False,
-                creationflags=subprocess.CREATE_NO_WINDOW
+            # Launch the injector in a new console window.
+            # This allows the user to see the output and prevents IDA from blocking.
+            subprocess.Popen(
+                command,
+                creationflags=subprocess.CREATE_NEW_CONSOLE
             )
-            ida_kernwin.msg("\n--- Injector Output ---\n")
-            if result.stdout:
-                ida_kernwin.msg(result.stdout)
-            if result.stderr:
-                ida_kernwin.warning(result.stderr)
-            ida_kernwin.msg("--- End Injector Output ---\n")
-            if result.returncode == 0:
-                ida_kernwin.msg("Injection command executed successfully.\n")
-            else:
-                ida_kernwin.warning(f"Injector exited with code {result.returncode}.\n")
+            ida_kernwin.msg("Injection command sent to the injector process.\n")
         except Exception as e:
-            ida_kernwin.warning(f"An unexpected error occurred: {e}\n")
+            ida_kernwin.warning(f"An unexpected error occurred while launching the injector: {e}\n")
 
         ida_kernwin.msg("------------------------------------\n")
         ida_kernwin.msg("You can now resume the process in IDA (F9).\n")
 
 def PLUGIN_ENTRY():
     return ScyllaInjectorPlugin()
+ 

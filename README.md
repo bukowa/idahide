@@ -25,9 +25,9 @@ These files are part of the official ScyllaHide distribution.
 
 ## How to Use
 
-Once the plugin is installed and configured, you will find a new menu under **Debugger > ScyllaHide** and a new "ScyllaHide" toolbar.
+Once the plugin is installed and configured, you will find a new menu under **Debugger > ScyllaHide** and a new **ScyllaHide toolbar**.
 
-![IDA Debugger Menu](readme.png)
+![IDA Debugger Menu](./readme.png)
 
 ### Option 1: Inject into a Running Process
 

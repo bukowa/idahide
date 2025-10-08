@@ -59,6 +59,25 @@ class InjectHandler(ida_kernwin.action_handler_t):
     def update(self, ctx):
         return ida_kernwin.AST_ENABLE_ALWAYS
 
+class ScyllaStartHook(ida_dbg.DBG_Hooks):
+    """
+    A temporary debugger hook to inject ScyllaHide as soon as the process
+    is started and suspended for the first time.
+    """
+    def __init__(self, plugin_instance):
+        super(ScyllaStartHook, self).__init__()
+        self.plugin = plugin_instance
+
+    def dbg_suspend_process(self, *args):
+        ida_kernwin.msg("Process suspended. Now injecting ScyllaHide...\n")
+        
+        # 1. Perform the injection
+        self.plugin.inject_scylla()
+        
+        # 2. Unhook and clean up to avoid being called again
+        self.unhook()
+        return 0
+
 class StartAndInjectHandler(ida_kernwin.action_handler_t):
     """Action handler for starting a new process and then injecting."""
     def __init__(self, plugin_instance):
@@ -71,16 +90,19 @@ class StartAndInjectHandler(ida_kernwin.action_handler_t):
         # 1. Check if a process is already running
         if ida_dbg.get_process_state() != ida_dbg.DSTATE_NOTASK:
             ida_kernwin.warning("A process is already being debugged. Please terminate it first.")
-            ida_kernwin.msg("-------------------------------------------\n")
             return 1
 
-        # 2. Start the process using the configured options
+        # 2. Install a temporary hook that will trigger the injection on suspend.
+        self.hook = ScyllaStartHook(self.plugin)
+        self.hook.hook()
+        ida_kernwin.msg("Hook installed. Starting process...\n")
+
+        # 3. Start the process. The hook will take care of the injection.
         if start_process_with_options():
-            # 3. If the process started successfully, IDA will suspend it. Now we can inject.
-            ida_kernwin.msg("Process started and suspended. Now injecting ScyllaHide...\n")
-            self.plugin.inject_scylla()
+            ida_kernwin.msg("Process start command sent. Waiting for suspend event...\n")
         else:
-            ida_kernwin.msg("Process did not start. Aborting injection.\n")
+            ida_kernwin.msg("Process did not start. Aborting.\n")
+            self.hook.unhook() # Clean up the hook if process fails to start
 
         ida_kernwin.msg("-------------------------------------------\n")
         return 1
@@ -111,13 +133,20 @@ class ScyllaInjectorPlugin(ida_idaapi.plugin_t):
         start_inject_action_desc = ida_kernwin.action_desc_t(
             'scylla:start_and_inject',
             'ScyllaHide: Start process and inject',
-            StartAndInjectHandler(self))
+            StartAndInjectHandler(self),
+            'Ctrl-Alt-R')
         ida_kernwin.register_action(start_inject_action_desc)
         ida_kernwin.attach_action_to_menu('Debugger/ScyllaHide/', 'scylla:start_and_inject', ida_kernwin.SETMENU_APP)
+
+        # Create a toolbar and add the actions
+        ida_kernwin.create_toolbar("ScyllaHideToolbar", "ScyllaHide")
+        ida_kernwin.attach_action_to_toolbar("ScyllaHideToolbar", "scylla:inject")
+        ida_kernwin.attach_action_to_toolbar("ScyllaHideToolbar", "scylla:start_and_inject")
 
         return ida_idaapi.PLUGIN_OK
 
     def term(self):
+        ida_kernwin.delete_toolbar("ScyllaHideToolbar")
         ida_kernwin.unregister_action('scylla:inject')
         ida_kernwin.unregister_action('scylla:start_and_inject')
         ida_kernwin.msg("ScyllaHide Injector plugin unloaded.\n")

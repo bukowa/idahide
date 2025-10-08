@@ -111,7 +111,7 @@ class StartAndInjectHandler(ida_kernwin.action_handler_t):
         return ida_kernwin.AST_ENABLE_ALWAYS
 
 class ScyllaInjectorPlugin(ida_idaapi.plugin_t):
-    flags = ida_idaapi.PLUGIN_UNL
+    flags = ida_idaapi.PLUGIN_KEEP
     comment = "Injects ScyllaHide into processes"
     help = "Use 'ScyllaHide: Inject into process' while a process is suspended in the IDA debugger to inject ScyllaHide."
     wanted_name = "ScyllaHide Injector"
@@ -143,7 +143,7 @@ class ScyllaInjectorPlugin(ida_idaapi.plugin_t):
         ida_kernwin.attach_action_to_toolbar("ScyllaHideToolbar", "scylla:inject")
         ida_kernwin.attach_action_to_toolbar("ScyllaHideToolbar", "scylla:start_and_inject")
 
-        return ida_idaapi.PLUGIN_OK
+        return ida_idaapi.PLUGIN_KEEP
 
     def term(self):
         ida_kernwin.delete_toolbar("ScyllaHideToolbar")

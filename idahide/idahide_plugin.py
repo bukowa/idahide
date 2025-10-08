@@ -67,8 +67,21 @@ class StartAndInjectHandler(ida_kernwin.action_handler_t):
 
     def activate(self, ctx):
         ida_kernwin.msg("--- ScyllaHide Auto-Starter & Injector ---\n")
-        # Logic to start and inject will be added here.
-        ida_kernwin.msg("Start and inject action triggered. Logic to be implemented.\n")
+
+        # 1. Check if a process is already running
+        if ida_dbg.get_process_state() != ida_dbg.DSTATE_NOTASK:
+            ida_kernwin.warning("A process is already being debugged. Please terminate it first.")
+            ida_kernwin.msg("-------------------------------------------\n")
+            return 1
+
+        # 2. Start the process using the configured options
+        if start_process_with_options():
+            # 3. If the process started successfully, IDA will suspend it. Now we can inject.
+            ida_kernwin.msg("Process started and suspended. Now injecting ScyllaHide...\n")
+            self.plugin.inject_scylla()
+        else:
+            ida_kernwin.msg("Process did not start. Aborting injection.\n")
+
         ida_kernwin.msg("-------------------------------------------\n")
         return 1
 
